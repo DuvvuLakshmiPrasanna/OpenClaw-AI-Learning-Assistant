@@ -1,0 +1,113 @@
+{
+  "version": "1.0",
+  "agent": {
+    "name": "TechBriefBot",
+    "description": "A personalized AI learning assistant that onboards users, learns their technical interests, and delivers a curated daily tech brief with interview questions and tidbits via Telegram.",
+    "defaultModel": "ollama/llama3:8b"
+  },
+  "models": {
+    "providers": {
+      "ollama": {
+        "enabled": true,
+        "baseUrl": "${env.OLLAMA_BASE_URL}",
+        "models": ["llama3:8b", "gemma:2b"]
+      },
+      "openai": {
+        "enabled": false,
+        "apiKey": "${env.OPENAI_API_KEY}",
+        "models": ["gpt-4o", "gpt-4o-mini"]
+      },
+      "anthropic": {
+        "enabled": false,
+        "apiKey": "${env.ANTHROPIC_API_KEY}",
+        "models": ["claude-3-5-sonnet-20241022"]
+      }
+    }
+  },
+  "plugins": {
+    "entries": {
+      "telegram": {
+        "enabled": true,
+        "package": "@openclaw/plugin-telegram",
+        "config": {
+          "botToken": "${env.TELEGRAM_BOT_TOKEN}",
+          "allowedUserIds": [],
+          "parseMode": "MarkdownV2"
+        }
+      }
+    }
+  },
+  "tools": {
+    "web_search": {
+      "enabled": true,
+      "provider": "duckduckgo",
+      "config": {
+        "maxResults": 10,
+        "region": "en-us",
+        "safeSearch": "moderate"
+      }
+    },
+    "web_fetch": {
+      "enabled": true,
+      "config": {
+        "timeout": 15000,
+        "maxContentLength": 50000
+      }
+    },
+    "memory_store": {
+      "enabled": true,
+      "config": {
+        "persistPath": "${env.OPENCLAW_DATA_DIR}/memory"
+      }
+    }
+  },
+  "skills": {
+    "directory": "${env.OPENCLAW_SKILLS_DIR}",
+    "entries": [
+      {
+        "name": "user-onboarding",
+        "path": "skills/user-onboarding/SKILL.md",
+        "enabled": true
+      },
+      {
+        "name": "daily-quiz",
+        "path": "skills/daily-quiz/SKILL.md",
+        "enabled": true
+      }
+    ]
+  },
+  "standingOrders": [
+    {
+      "name": "trigger-user-onboarding",
+      "description": "Automatically starts onboarding for any user whose profile does not exist in memory.",
+      "condition": "memory.user_profile_{{user.id}} does not exist",
+      "action": {
+        "runSkill": "user-onboarding"
+      },
+      "enabled": true
+    }
+  ],
+  "cron": {
+    "jobs": [
+      {
+        "name": "nightly-tech-brief",
+        "description": "Sends the personalized daily tech brief to each registered user at 9 PM in their local timezone.",
+        "schedule": "0 21 * * *",
+        "timezone": "${env.DEFAULT_CRON_TIMEZONE}",
+        "session": "isolated",
+        "message": "Run the daily-quiz skill for the primary user. Use their stored preferences from memory to generate and send a personalized daily tech brief to them on Telegram. Include exactly 5 interview questions and 3-5 technical tidbits formatted exactly as specified in the daily-quiz skill.",
+        "announce": true,
+        "channel": "telegram",
+        "enabled": true
+      }
+    ]
+  },
+  "logging": {
+    "level": "${env.LOG_LEVEL}",
+    "file": "${env.OPENCLAW_DATA_DIR}/logs/gateway.log"
+  },
+  "memory": {
+    "persistOnShutdown": true,
+    "backupIntervalMinutes": 30
+  }
+}

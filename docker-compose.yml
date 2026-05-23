@@ -1,0 +1,112 @@
+version: "3.9"
+
+# ============================================================
+#  docker-compose.yml — OpenClaw Learning Assistant
+#  Orchestrates: OpenClaw Gateway + Ollama (local LLM)
+#  Optional: SearXNG (self-hosted search engine)
+# ============================================================
+
+services:
+
+  # ── OpenClaw Gateway ────────────────────────────────────────
+  openclaw:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+    container_name: openclaw-agent
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - OLLAMA_BASE_URL=http://ollama:11434
+      - OPENCLAW_DATA_DIR=/app/data
+      - OPENCLAW_SKILLS_DIR=/app/skills
+    volumes:
+      # Persist memory, logs, and config across restarts
+      - openclaw_data:/app/data
+      # Mount skill files so you can edit without rebuilding
+      - ./skills:/app/skills:ro
+      - ./config/openclaw.json:/app/config/openclaw.json:ro
+    ports:
+      - "3000:3000"
+    depends_on:
+      ollama:
+        condition: service_healthy
+    networks:
+      - openclaw_net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+  # ── Ollama (Local LLM Server) ────────────────────────────────
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama-server
+    restart: unless-stopped
+    volumes:
+      - ollama_models:/root/.ollama
+    ports:
+      - "11434:11434"
+    networks:
+      - openclaw_net
+    # Pulls the default model on startup so you don't have to manually
+    entrypoint: ["/bin/sh", "-c"]
+    command: >
+      "ollama serve &
+       sleep 5 &&
+       ollama pull llama3:8b &&
+       wait"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      interval: 30s
+      timeout: 15s
+      retries: 5
+      start_period: 60s
+    # Uncomment the following if you have an NVIDIA GPU:
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+
+  # ── SearXNG (Optional: Self-Hosted Web Search) ──────────────
+  # Uncomment this service if you prefer self-hosted search over DuckDuckGo.
+  # Also set SEARXNG_BASE_URL in your .env and update openclaw.json accordingly.
+  #
+  # searxng:
+  #   image: searxng/searxng:latest
+  #   container_name: searxng
+  #   restart: unless-stopped
+  #   environment:
+  #     - SEARXNG_BASE_URL=http://searxng:8080
+  #   volumes:
+  #     - ./config/searxng:/etc/searxng:rw
+  #   ports:
+  #     - "8080:8080"
+  #   networks:
+  #     - openclaw_net
+  #   cap_drop:
+  #     - ALL
+  #   cap_add:
+  #     - CHOWN
+  #     - SETGID
+  #     - SETUID
+  #     - DAC_OVERRIDE
+
+# ── Named Volumes ────────────────────────────────────────────
+volumes:
+  openclaw_data:
+    driver: local
+  ollama_models:
+    driver: local
+
+# ── Networks ─────────────────────────────────────────────────
+networks:
+  openclaw_net:
+    driver: bridge
