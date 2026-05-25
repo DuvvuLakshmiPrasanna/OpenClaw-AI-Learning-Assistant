@@ -1,0 +1,9 @@
+#!/bin/sh
+set -eu
+
+ollama serve &
+
+sleep 5
+
+ollama pull llama3:8b
+wait

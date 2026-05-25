@@ -20,9 +20,11 @@ services:
       - OLLAMA_BASE_URL=http://ollama:11434
       - OPENCLAW_DATA_DIR=/app/data
       - OPENCLAW_SKILLS_DIR=/app/skills
+      - USER_TIMEZONE=${USER_TIMEZONE:-UTC}
     volumes:
       # Persist memory, logs, and config across restarts
       - openclaw_data:/app/data
+      - agent_memory:/app/data/memory
       # Mount skill files so you can edit without rebuilding
       - ./skills:/app/skills:ro
       - ./config/openclaw.json:/app/config/openclaw.json:ro
@@ -47,17 +49,12 @@ services:
     restart: unless-stopped
     volumes:
       - ollama_models:/root/.ollama
+      - ./scripts/ollama-entrypoint.sh:/etc/ollama-entrypoint.sh:ro
     ports:
       - "11434:11434"
     networks:
       - openclaw_net
-    # Pulls the default model on startup so you don't have to manually
-    entrypoint: ["/bin/sh", "-c"]
-    command: >
-      "ollama serve &
-       sleep 5 &&
-       ollama pull llama3:8b &&
-       wait"
+    entrypoint: ["/bin/sh", "/etc/ollama-entrypoint.sh"]
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
       interval: 30s
@@ -100,6 +97,8 @@ services:
 # ── Named Volumes ────────────────────────────────────────────
 volumes:
   openclaw_data:
+    driver: local
+  agent_memory:
     driver: local
   ollama_models:
     driver: local

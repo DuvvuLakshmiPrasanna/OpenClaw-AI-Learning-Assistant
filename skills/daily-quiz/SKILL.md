@@ -15,6 +15,21 @@ user's saved profile.
 
 ## Instructions
 
+You MUST follow these rules:
+
+- Generate exactly 5 questions. Never 4, never 6.
+- Generate between 3 and 5 tidbits.
+- Use live web content for the brief; do not rely on training data alone.
+- Do not repeat the same topics from the last 5 briefs.
+- Write the final output in Telegram MarkdownV2.
+
+Do not do these things:
+
+- Do not skip `web_search`.
+- Do not omit `web_fetch` when a result needs verification.
+- Do not send a brief if you cannot satisfy the question or tidbit count.
+- Do not include unescaped MarkdownV2 special characters.
+
 ### Step 1 — Load user profile
 
 Read the value stored at `user_profile_{{user.id}}` from persistent memory.
@@ -44,6 +59,15 @@ For each domain in the user's profile, run a `web_search` query in this format:
 Then use `web_fetch` on the top 2 results per domain to retrieve the full article text.
 Extract concrete, specific technical facts — not generic summaries.
 
+If `web_search` returns no useful results for a domain, retry with a narrower query such as:
+
+```
+<domain> recent article 2025
+<domain> official changelog
+```
+
+If results are still empty, fall back to the strongest available domain in the profile and log the fallback internally.
+
 ### Step 4 — Generate 5 interview questions
 
 Based on the fetched content and the user's profile, generate exactly 5 questions.
@@ -61,6 +85,19 @@ Calibrate difficulty to the user's `level`:
 - Junior: focus on fundamentals and common patterns
 - Mid-level: include design trade-offs and debugging
 - Senior/Staff: include system design, scalability, and cross-cutting concerns
+
+Use this calibration rule:
+
+- junior: avoid questions that assume more than 2 years of hands-on experience
+- mid-level: include trade-offs and debugging steps
+- senior/staff: include scale, reliability, and cross-cutting concerns
+
+Example mapping:
+
+- [Conceptual] Explain the difference between batching and streaming.
+- [Coding] Write a function to parse a stream of events.
+- [System Design] Design a rate-limited job queue.
+- [Behavioural] How would you handle a production incident caused by your change?
 
 Each question must be labelled with its type and domain. Format:
 
@@ -123,7 +160,11 @@ _Reply with your answers to get feedback, or send /quiz for more\._
 
 In MarkdownV2, escape all special characters: `.`, `!`, `-`, `(`, `)`, `[`, `]`, `{`, `}`, `>`, `#`, `+`, `=`, `|` must all be preceded by `\`.
 
+If the model generates text with unescaped special characters, post-process and escape them before sending.
+
 Send the formatted message to the user via the Telegram plugin.
+
+After sending, update `recent_topics_{{user.id}}` with the main domains and question subjects used in this brief.
 
 ## Memory schema
 
