@@ -34,6 +34,52 @@ flowchart LR
 5. A cron job named `nightly-tech-brief` runs every day at 9 PM in the user’s timezone.
 6. The daily quiz skill reads memory, uses `web_search` for fresh content, formats the message in Telegram MarkdownV2, and sends it through Telegram.
 
+## Architecture
+
+```
+┌─────────────────────┐                     ┌──────────────────────┐
+│     Telegram App    │                     │    External Web      │
+└──────────┬──────────┘                     └──────────┬───────────┘
+           │ send message                              │ search results
+           ▼                                           │
+┌──────────────────────┐                   ┌──────────┴───────────┐
+│    Telegram API      │                   │  web_search / fetch  │
+└──────────┬───────────┘                   └──────────┬───────────┘
+           │ forward to gateway                       │ invoked by agent
+           ▼                                          │
+┌──────────────────────────────────────────────────────────────────┐
+│                     OpenClaw Gateway                             │
+│                                                                  │
+│  ┌─────────────────┐    ┌──────────────────────────────────┐     │
+│  │  Cron Scheduler │───►│       Agent Core (LLM)           │◄────┤
+│  │  0 21 * * *     │    │     Ollama · llama3:8b            │     │
+│  └─────────────────┘    └──────┬──────────────┬────────────┘     │
+│                                │              │                  │
+│  ┌─────────────────┐           ▼              ▼                  │
+│  │ Telegram Plugin │  ┌──────────────┐ ┌──────────────────┐      │
+│  │ recv/send msgs  │  │ Skill files  │ │ Persistent memory│      │
+│  └────────┬────────┘  │ user-onboard │ │ user_profile_{}  │      │
+│           │           │ daily-quiz   │ │ recent_topics_() │      │
+│           │           └──────────────┘ └──────────────────┘      │
+└───────────┼──────────────────────────────────────────────────────┘
+            │ send formatted brief
+            ▼
+┌──────────────────────┐
+│    Telegram API      │
+└──────────────────────┘
+```
+
+| Component | Responsibility |
+|---|---|
+| Telegram Plugin | Long-poll connection to Telegram; routes inbound messages to the agent and sends outbound replies |
+| Agent Core | LLM reasoning engine; reads skill instructions, calls tools, writes memory |
+| Skill Registry | Loads `SKILL.md` files and exposes their instructions as behavioural context |
+| Persistent Memory | Key-value disk store; survives restarts; holds one profile and one topic-history entry per user |
+| web_search | Queries DuckDuckGo for recent content in the user's domains |
+| web_fetch | Retrieves and parses full article text from search result URLs |
+| Cron Scheduler | Fires the daily brief at 21:00 in the user's configured IANA timezone |
+| Standing Order | Evaluates `user_profile_{{user.id}}` on every inbound message; triggers onboarding exactly once |
+
 ## Component Overview
 
 - `openclaw` runs the assistant, gateway, skills, cron scheduler, and Telegram delivery.
@@ -107,107 +153,126 @@ openclaw memory get "user_profile_USER_ID"
 openclaw cron trigger "nightly-tech-brief"
 ```
 
+## Running locally without Docker
+
+If you prefer to run without containers:
+
+### 1. Install Ollama and pull the model
+
+```bash
+curl -fsSL https://ollama.ai/install.sh | sh
+ollama pull llama3:8b
+ollama serve   # keep this terminal open
+```
+
+### 2. Install OpenClaw
+
+```bash
+npm install -g openclaw
+```
+
+### 3. Run initial setup
+
+```bash
+openclaw onboard
+```
+
+Select Ollama as the model provider, `llama3:8b` as the model, and DuckDuckGo for web search.
+
+### 4. Copy skills
+
+```bash
+mkdir -p ~/.openclaw/skills/user-onboarding ~/.openclaw/skills/daily-quiz
+cp skills/user-onboarding/SKILL.md ~/.openclaw/skills/user-onboarding/SKILL.md
+cp skills/daily-quiz/SKILL.md ~/.openclaw/skills/daily-quiz/SKILL.md
+```
+
+### 5. Copy config
+
+```bash
+cp config/openclaw.json ~/.openclaw/openclaw.json
+```
+
+Edit `~/.openclaw/openclaw.json` and set `botToken` to `"${env.TELEGRAM_BOT_TOKEN}"` if not already set.
+
+### 6. Set environment variables
+
+```bash
+export TELEGRAM_BOT_TOKEN=your_token_here
+export OLLAMA_BASE_URL=http://localhost:11434
+export DEFAULT_CRON_TIMEZONE=Asia/Kolkata
+export OPENCLAW_DATA_DIR=~/.openclaw/data
+export OPENCLAW_SKILLS_DIR=~/.openclaw/skills
+```
+
+### 7. Start the gateway
+
+```bash
+openclaw gateway start
+```
+
+## Verifying the setup
+
+### Check gateway logs
+
+```bash
+# Docker
+docker compose logs -f openclaw
+
+# Local
+openclaw gateway status
+```
+
+### Confirm onboarding saved correctly
+
+After completing onboarding, verify the profile was stored:
+
+```bash
+# Docker
+docker compose exec openclaw openclaw memory get "user_profile_YOUR_TELEGRAM_USER_ID"
+
+# Local
+openclaw memory get "user_profile_YOUR_TELEGRAM_USER_ID"
+```
+
+Replace `YOUR_TELEGRAM_USER_ID` with your actual Telegram numeric user ID, which appears in the gateway logs on first message.
+
+### Trigger the daily brief manually
+
+```bash
+# Docker
+docker compose exec openclaw openclaw cron trigger "nightly-tech-brief"
+
+# Local
+openclaw cron trigger "nightly-tech-brief"
+```
+
+The brief should appear in your Telegram within 30–60 seconds depending on LLM inference speed.
+
+### List registered cron jobs
+
+```bash
+openclaw cron list
+```
+
+You should see `nightly-tech-brief` with schedule `0 21 * * *` and your configured timezone.
+
 ## Design Choice: Standing Order for Onboarding
 
 I used a standing order rather than a webhook because the onboarding trigger is already internal to OpenClaw and depends only on memory state. That keeps the implementation simpler, avoids public endpoint and TLS setup, and matches the project goal of running everything locally in a containerized environment.
 
-## Architecture
-
-The container setup is intentionally small and explicit:
-
-- `openclaw` runs the gateway, skills, cron, Telegram delivery, and memory-backed assistant logic.
-- `ollama` serves the local model used by the assistant and persists models in a named volume.
-- `openclaw_data` preserves memory and logs between restarts.
-- `skills/` is mounted read-only so skill updates can be edited without rebuilding the image.
-
-This layout keeps the submission easy to review while still covering the full learning-assistant workflow end to end.
-
-## Configuration Snippet
-
-The submission config includes the full routing and scheduler setup used by the bot:
-
-```json
-{
-  "skills": {
-    "directory": "${env.OPENCLAW_SKILLS_DIR}",
-    "entries": [
-      {
-        "name": "user-onboarding",
-        "path": "skills/user-onboarding/SKILL.md",
-        "enabled": true
-      },
-      {
-        "name": "daily-quiz",
-        "path": "skills/daily-quiz/SKILL.md",
-        "enabled": true
-      }
-    ]
-  },
-  "standingOrders": [
-    {
-      "name": "trigger-user-onboarding",
-      "description": "Automatically starts onboarding for any user whose profile does not exist in memory.",
-      "condition": "memory.user_profile_{{user.id}} does not exist",
-      "action": {
-        "runSkill": "user-onboarding"
-      },
-      "enabled": true
-    }
-  ],
-  "cron": {
-    "jobs": [
-      {
-        "name": "nightly-tech-brief",
-        "schedule": "0 21 * * *",
-        "timezone": "${env.DEFAULT_CRON_TIMEZONE}",
-        "session": "isolated",
-        "channel": "telegram",
-        "enabled": true
-      }
-    ]
-  },
-  "models": {
-    "providers": {
-      "ollama": {
-        "enabled": true,
-        "baseUrl": "${env.OLLAMA_BASE_URL}"
-      }
-    }
-  },
-  "plugins": {
-    "entries": {
-      "telegram": {
-        "enabled": true,
-        "package": "@openclaw/plugin-telegram",
-        "config": {
-          "botToken": "YOUR_TELEGRAM_BOT_TOKEN_HERE"
-        }
-      }
-    }
-  },
-  "tools": {
-    "web_search": {
-      "enabled": true,
-      "provider": "duckduckgo"
-    },
-    "web_fetch": {
-      "enabled": true
-    },
-    "memory_store": {
-      "enabled": true
-    }
-  }
-}
-```
-
 ## Troubleshooting
 
-| Symptom                                       | Likely cause                       | Fix                                                                            |
-| --------------------------------------------- | ---------------------------------- | ------------------------------------------------------------------------------ |
-| `openclaw cron list` times out                | Gateway is not reachable yet       | Restart the gateway and rerun the CLI from the same shell                      |
-| Telegram delivery stalls                      | Bot token or bot session issue     | Confirm `TELEGRAM_BOT_TOKEN` and test the bot in Telegram                      |
-| Ollama does not start                         | Local model container is unhealthy | Recreate the Ollama container and verify `OLLAMA_BASE_URL=http://ollama:11434` |
-| Windows CLI commands fail in a fresh terminal | PATH or shell session is stale     | Reopen the terminal or call the launcher from the installed location           |
+| Symptom | Likely cause | Resolution |
+|---|---|---|
+| Bot does not respond at all | Telegram plugin not connected | Check `TELEGRAM_BOT_TOKEN` in `.env`, restart the agent |
+| Onboarding does not start | Standing order not registered or profile already exists | Run `openclaw memory list` to check; delete stale profile with `openclaw memory delete "user_profile_ID"` |
+| Cron job does not fire at 9 PM | Wrong timezone or cron expression | Run `openclaw cron list` and verify the schedule and `DEFAULT_CRON_TIMEZONE` value |
+| Agent gives irrelevant answers | Model ignoring skill instructions | Upgrade from a smaller model; `llama3:8b` is the minimum recommended |
+| Memory not persisting after restart | Volume not mounted | Verify `openclaw_data` volume is defined and mounted in `docker-compose.yml` |
+| Ollama connection refused | Ollama container not healthy yet | Wait 60s for model pull to complete; check `docker compose logs ollama` |
+| MarkdownV2 parse error in Telegram | Unescaped special characters in generated text | The daily-quiz skill spec requires escaping — increase model quality or add a post-processing step |
+| `web_search` returns no results | DuckDuckGo rate-limit or network issue | Wait a few minutes and retry; or switch to the SearXNG service in docker-compose |
 
 ## Design Rationale
 
