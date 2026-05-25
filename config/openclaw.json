@@ -80,7 +80,9 @@
     {
       "name": "trigger-user-onboarding",
       "description": "Automatically starts onboarding for any user whose profile does not exist in memory.",
+      "if": "memory.user_profile_{{user.id}} does not exist",
       "condition": "memory.user_profile_{{user.id}} does not exist",
+      "runSkill": "user-onboarding",
       "action": {
         "runSkill": "user-onboarding"
       },
@@ -93,6 +95,7 @@
         "name": "nightly-tech-brief",
         "description": "Sends the personalized daily tech brief to each registered user at 9 PM in their local timezone.",
         "schedule": "0 21 * * *",
+        "tz": "${env.USER_TIMEZONE}",
         "timezone": "${env.DEFAULT_CRON_TIMEZONE}",
         "session": "isolated",
         "message": "Run the daily-quiz skill for the primary user. Use their stored preferences from memory to generate and send a personalized daily tech brief to them on Telegram. Include exactly 5 interview questions and 3-5 technical tidbits formatted exactly as specified in the daily-quiz skill.",
