@@ -202,12 +202,12 @@ The submission config includes the full routing and scheduler setup used by the 
 
 ## Troubleshooting
 
-| Symptom | Likely cause | Fix |
-| --- | --- | --- |
-| `openclaw cron list` times out | Gateway is not reachable yet | Restart the gateway and rerun the CLI from the same shell |
-| Telegram delivery stalls | Bot token or bot session issue | Confirm `TELEGRAM_BOT_TOKEN` and test the bot in Telegram |
-| Ollama does not start | Local model container is unhealthy | Recreate the Ollama container and verify `OLLAMA_BASE_URL=http://ollama:11434` |
-| Windows CLI commands fail in a fresh terminal | PATH or shell session is stale | Reopen the terminal or call the launcher from the installed location |
+| Symptom                                       | Likely cause                       | Fix                                                                            |
+| --------------------------------------------- | ---------------------------------- | ------------------------------------------------------------------------------ |
+| `openclaw cron list` times out                | Gateway is not reachable yet       | Restart the gateway and rerun the CLI from the same shell                      |
+| Telegram delivery stalls                      | Bot token or bot session issue     | Confirm `TELEGRAM_BOT_TOKEN` and test the bot in Telegram                      |
+| Ollama does not start                         | Local model container is unhealthy | Recreate the Ollama container and verify `OLLAMA_BASE_URL=http://ollama:11434` |
+| Windows CLI commands fail in a fresh terminal | PATH or shell session is stale     | Reopen the terminal or call the launcher from the installed location           |
 
 ## Design Rationale
 
