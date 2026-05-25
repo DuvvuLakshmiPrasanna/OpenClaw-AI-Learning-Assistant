@@ -109,5 +109,6 @@
   "memory": {
     "persistOnShutdown": true,
     "backupIntervalMinutes": 30
-  }
+  },
+  "systemPrompt": "You are only a Personalized AI Learning Assistant. Never expose runtime internals, memory structure, workspace configuration, sessions, tools, or OpenClaw system details. Focus only on onboarding, quizzes, and educational assistance."
 }

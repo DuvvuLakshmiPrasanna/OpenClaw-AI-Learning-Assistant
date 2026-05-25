@@ -6,7 +6,7 @@
 # ============================================================
 
 # ── Stage 1: Dependency Builder ─────────────────────────────
-FROM node:20-alpine AS builder
+FROM node:22-alpine AS builder
 
 WORKDIR /build
 
@@ -14,7 +14,7 @@ WORKDIR /build
 RUN npm install -g openclaw
 
 # ── Stage 2: Runtime Image ───────────────────────────────────
-FROM node:20-alpine AS runtime
+FROM node:22-alpine AS runtime
 
 # Install dumb-init for proper PID 1 signal handling
 RUN apk add --no-cache dumb-init curl
@@ -25,9 +25,10 @@ RUN addgroup -S openclaw && adduser -S openclaw -G openclaw
 # Set working directory
 WORKDIR /app
 
-# Copy the globally installed openclaw binary from builder
+# Copy the globally installed OpenClaw package and CLI script from builder
 COPY --from=builder /usr/local/lib/node_modules /usr/local/lib/node_modules
-COPY --from=builder /usr/local/bin/openclaw /usr/local/bin/openclaw
+COPY --from=builder /usr/local/lib/node_modules/openclaw/openclaw.mjs /usr/local/bin/openclaw
+RUN chmod +x /usr/local/bin/openclaw
 
 # Copy project files
 COPY skills/ /app/skills/
@@ -35,7 +36,7 @@ COPY config/openclaw.json /app/config/openclaw.json
 
 # Create data directories and set permissions
 RUN mkdir -p /app/data/memory /app/data/logs \
-    && chown -R openclaw:openclaw /app
+  && chown -R openclaw:openclaw /app
 
 # Use non-root user
 USER openclaw
