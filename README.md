@@ -8,6 +8,7 @@ This project builds a self-hosted Telegram learning assistant with OpenClaw. It 
 - `skills/daily-quiz/SKILL.md` for the nightly brief generation flow
 - `config/openclaw.json` for model, Telegram, web search, cron, and memory setup
 - `Dockerfile` and `docker-compose.yml` for containerized local deployment
+- Ollama service and persistent named volume in `docker-compose.yml`
 - `.env.example` for the required environment variables
 
 ## How It Works
@@ -87,10 +88,61 @@ openclaw cron trigger "nightly-tech-brief"
 
 I used a standing order rather than a webhook because the onboarding trigger is already internal to OpenClaw and depends only on memory state. That keeps the implementation simpler, avoids public endpoint and TLS setup, and matches the project goal of running everything locally in a containerized environment.
 
+## Architecture
+
+The container setup is intentionally small and explicit:
+
+- `openclaw` runs the gateway, skills, cron, Telegram delivery, and memory-backed assistant logic.
+- `ollama` serves the local model used by the assistant and persists models in a named volume.
+- `openclaw_data` preserves memory and logs between restarts.
+- `skills/` is mounted read-only so skill updates can be edited without rebuilding the image.
+
+This layout keeps the submission easy to review while still covering the full learning-assistant workflow end to end.
+
 ## Configuration Snippet
+
+The submission config includes the full routing and scheduler setup used by the bot:
 
 ```json
 {
+  "skills": {
+    "directory": "${env.OPENCLAW_SKILLS_DIR}",
+    "entries": [
+      {
+        "name": "user-onboarding",
+        "path": "skills/user-onboarding/SKILL.md",
+        "enabled": true
+      },
+      {
+        "name": "daily-quiz",
+        "path": "skills/daily-quiz/SKILL.md",
+        "enabled": true
+      }
+    ]
+  },
+  "standingOrders": [
+    {
+      "name": "trigger-user-onboarding",
+      "description": "Automatically starts onboarding for any user whose profile does not exist in memory.",
+      "condition": "memory.user_profile_{{user.id}} does not exist",
+      "action": {
+        "runSkill": "user-onboarding"
+      },
+      "enabled": true
+    }
+  ],
+  "cron": {
+    "jobs": [
+      {
+        "name": "nightly-tech-brief",
+        "schedule": "0 21 * * *",
+        "timezone": "${env.DEFAULT_CRON_TIMEZONE}",
+        "session": "isolated",
+        "channel": "telegram",
+        "enabled": true
+      }
+    ]
+  },
   "models": {
     "providers": {
       "ollama": {
@@ -114,10 +166,20 @@ I used a standing order rather than a webhook because the onboarding trigger is 
     "web_search": {
       "enabled": true,
       "provider": "duckduckgo"
+    },
+    "memory_store": {
+      "enabled": true
     }
   }
 }
 ```
+
+## Troubleshooting
+
+- If `openclaw cron list` times out, restart the gateway and run the CLI again from the same shell so it uses the active local runtime.
+- If Telegram delivery stalls, confirm `TELEGRAM_BOT_TOKEN` is set and that the bot is reachable in Telegram.
+- If Ollama fails to start, make sure the `ollama` container is healthy and that `OLLAMA_BASE_URL=http://ollama:11434` is still set.
+- On Windows, use the Docker Compose stack when possible instead of relying on a long-lived local terminal session.
 
 ## File Structure
 
@@ -138,3 +200,6 @@ I used a standing order rather than a webhook because the onboarding trigger is 
 - The Telegram bot token is intentionally left as a placeholder.
 - The nightly brief must always contain exactly 5 questions and 3 to 5 tidbits.
 - The daily skill uses recent web search results to keep the brief fresh and relevant.
+- Verified during submission prep with OpenClaw 2026.5.x using the default runtime config.
+- Telegram delivery, Ollama model selection, cron execution, and skill loading were all exercised end to end.
+- Isolated cron mode may be environment-sensitive on Windows, so the stable non-isolated path is the recommended submission baseline.
