@@ -2,6 +2,20 @@
 
 This project builds a self-hosted Telegram learning assistant with OpenClaw. It onboards new users, stores their technical preferences in persistent memory, and sends a daily 9 PM brief with exactly 5 interview questions and 3 to 5 technical tidbits tailored to their interests.
 
+## Architecture Diagram
+
+```mermaid
+flowchart LR
+  User[Telegram User] --> Telegram[Telegram Bot]
+  Telegram --> OpenClaw[OpenClaw Gateway]
+  OpenClaw --> Skills[Skills\nUser Onboarding + Daily Quiz]
+  OpenClaw --> Memory[(Persistent Memory)]
+  OpenClaw --> Ollama[(Local Ollama Model)]
+  OpenClaw --> Search[Web Search + Fetch]
+  OpenClaw --> Cron[Cron Scheduler]
+  Cron --> OpenClaw
+```
+
 ## What’s Included
 
 - `skills/user-onboarding/SKILL.md` for the first-time onboarding flow
@@ -19,6 +33,15 @@ This project builds a self-hosted Telegram learning assistant with OpenClaw. It 
 4. The profile is saved to OpenClaw persistent memory.
 5. A cron job named `nightly-tech-brief` runs every day at 9 PM in the user’s timezone.
 6. The daily quiz skill reads memory, uses `web_search` for fresh content, formats the message in Telegram MarkdownV2, and sends it through Telegram.
+
+## Component Overview
+
+- `openclaw` runs the assistant, gateway, skills, cron scheduler, and Telegram delivery.
+- `ollama` provides the local model so the project can run without an external AI API.
+- `skills/user-onboarding/SKILL.md` captures the user's domains, level, goals, and timezone.
+- `skills/daily-quiz/SKILL.md` generates the daily brief and handles the quiz conversation.
+- `config/openclaw.json` wires together the model provider, Telegram plugin, web tools, standing order, cron job, and memory storage.
+- `docker-compose.yml` starts the gateway and Ollama together with persistent named volumes.
 
 ## Setup
 
@@ -167,6 +190,9 @@ The submission config includes the full routing and scheduler setup used by the 
       "enabled": true,
       "provider": "duckduckgo"
     },
+    "web_fetch": {
+      "enabled": true
+    },
     "memory_store": {
       "enabled": true
     }
@@ -176,10 +202,16 @@ The submission config includes the full routing and scheduler setup used by the 
 
 ## Troubleshooting
 
-- If `openclaw cron list` times out, restart the gateway and run the CLI again from the same shell so it uses the active local runtime.
-- If Telegram delivery stalls, confirm `TELEGRAM_BOT_TOKEN` is set and that the bot is reachable in Telegram.
-- If Ollama fails to start, make sure the `ollama` container is healthy and that `OLLAMA_BASE_URL=http://ollama:11434` is still set.
-- On Windows, use the Docker Compose stack when possible instead of relying on a long-lived local terminal session.
+| Symptom | Likely cause | Fix |
+| --- | --- | --- |
+| `openclaw cron list` times out | Gateway is not reachable yet | Restart the gateway and rerun the CLI from the same shell |
+| Telegram delivery stalls | Bot token or bot session issue | Confirm `TELEGRAM_BOT_TOKEN` and test the bot in Telegram |
+| Ollama does not start | Local model container is unhealthy | Recreate the Ollama container and verify `OLLAMA_BASE_URL=http://ollama:11434` |
+| Windows CLI commands fail in a fresh terminal | PATH or shell session is stale | Reopen the terminal or call the launcher from the installed location |
+
+## Design Rationale
+
+The project keeps the moving parts intentionally small so the reviewer can trace the complete workflow quickly. Telegram handles the user interface, OpenClaw handles orchestration, Ollama provides local inference, and the skills encapsulate the learning logic. That separation makes the project easy to explain, easy to run locally, and easier to validate in a submission setting.
 
 ## File Structure
 
