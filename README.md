@@ -2,6 +2,22 @@
 
 This project builds a self-hosted Telegram learning assistant with OpenClaw. It onboards new users, stores their technical preferences in persistent memory, and sends a daily 9 PM brief with exactly 5 interview questions and 3 to 5 technical tidbits tailored to their interests.
 
+## Table of Contents
+
+- [Architecture Diagram](#architecture-diagram)
+- [What’s Included](#whats-included)
+- [How It Works](#how-it-works)
+- [Architecture](#architecture)
+- [Component Overview](#component-overview)
+- [Prerequisites](#prerequisites)
+- [Setup](#setup)
+- [Running locally without Docker](#running-locally-without-docker)
+- [Verifying the setup](#verifying-the-setup)
+- [Design Decisions](#design-decisions)
+- [Troubleshooting](#troubleshooting)
+- [File Structure](#file-structure)
+- [Notes](#notes)
+
 ## Architecture Diagram
 
 ```mermaid
@@ -15,6 +31,16 @@ flowchart LR
   OpenClaw --> Cron[Cron Scheduler]
   Cron --> OpenClaw
 ```
+
+  The text view is the same flow in a simpler form:
+
+  ```text
+  User -> Telegram API -> OpenClaw Gateway -> Agent Core (Ollama)
+                                                -> Skill Registry
+                                                -> Persistent Memory
+                                                -> web_search / web_fetch
+                                                -> Telegram API
+  ```
 
 ## What’s Included
 
@@ -33,6 +59,27 @@ flowchart LR
 4. The profile is saved to OpenClaw persistent memory.
 5. A cron job named `nightly-tech-brief` runs every day at 9 PM in the user’s timezone.
 6. The daily quiz skill reads memory, uses `web_search` for fresh content, formats the message in Telegram MarkdownV2, and sends it through Telegram.
+
+## Onboarding Flow
+
+| Step | Question | Expected Result |
+|---|---|---|
+| 1 | Technical domains | Collect one or more comma-separated domains |
+| 2 | Experience level | Capture `Junior`, `Mid-level`, `Senior`, or `Staff / Principal` |
+| 3 | Learning goals | Capture the user's main learning goals |
+| 4 | Timezone | Capture a valid IANA timezone, or normalize a common abbreviation when possible |
+
+## Daily Brief Workflow
+
+| Step | Action | Output |
+|---|---|---|
+| 1 | Load the user's saved profile | Domains, level, goals, timezone |
+| 2 | Load recent topic history | Avoid repeating recent themes |
+| 3 | Run `web_search` for each domain | Fresh search results |
+| 4 | Use `web_fetch` on promising results | Full article text for verification |
+| 5 | Generate exactly 5 interview questions | MarkdownV2-formatted quiz content |
+| 6 | Generate 3 to 5 technical tidbits | Concise, specific insights |
+| 7 | Update topic history and send Telegram message | Persisted history plus delivered brief |
 
 ## Architecture
 
@@ -80,6 +127,57 @@ flowchart LR
 | Cron Scheduler | Fires the daily brief at 21:00 in the user's configured IANA timezone |
 | Standing Order | Evaluates `user_profile_{{user.id}}` on every inbound message; triggers onboarding exactly once |
 
+## Memory Schema
+
+```json
+{
+  "domains": ["<string>"],
+  "level": "<string>",
+  "goals": ["<string>"],
+  "timezone": "<string>"
+}
+```
+
+## Message Format
+
+The daily brief is sent in Telegram MarkdownV2 using this structure:
+
+```text
+🦞 *Your Daily Tech Brief — {date}*
+
+━━━━━━━━━━━━━━━━━━━━
+🧠 *Interview Questions*
+━━━━━━━━━━━━━━━━━━━━
+
+*Q1 \[Type — Domain\]*
+Question text
+
+*Q2 \[Type — Domain\]*
+Question text
+
+*Q3 \[Type — Domain\]*
+Question text
+
+*Q4 \[Type — Domain\]*
+Question text
+
+*Q5 \[Type — Domain\]*
+Question text
+
+━━━━━━━━━━━━━━━━━━━━
+💡 *Today's Tidbits*
+━━━━━━━━━━━━━━━━━━━━
+
+Tidbit one text here\.
+
+Tidbit two text here\.
+
+Tidbit three text here\.
+
+━━━━━━━━━━━━━━━━━━━━
+_Reply with your answers to get feedback, or send /quiz for more\._
+```
+
 ## Component Overview
 
 - `openclaw` runs the assistant, gateway, skills, cron scheduler, and Telegram delivery.
@@ -93,10 +191,13 @@ flowchart LR
 
 ### Prerequisites
 
-- Docker and Docker Compose v2
-- Node.js 20+ if you want to run OpenClaw locally outside Docker
-- A Telegram bot token from @BotFather
-- Ollama installed locally if you want to run the assistant with a local model
+| Requirement | Version | Notes |
+|---|---|---|
+| Node.js | 20 LTS+ | Required for OpenClaw when running locally |
+| Docker | 24+ | Required for the containerized path |
+| Docker Compose | v2 | Used by `docker compose up` and `docker compose logs` |
+| Telegram account | - | Needed to create a bot via @BotFather |
+| Ollama | Latest stable | Used for local model inference |
 
 ### 1. Configure Environment Variables
 
@@ -257,9 +358,13 @@ openclaw cron list
 
 You should see `nightly-tech-brief` with schedule `0 21 * * *` and your configured timezone.
 
-## Design Choice: Standing Order for Onboarding
+## Design Decisions
 
 I used a standing order rather than a webhook because the onboarding trigger is already internal to OpenClaw and depends only on memory state. That keeps the implementation simpler, avoids public endpoint and TLS setup, and matches the project goal of running everything locally in a containerized environment.
+
+I made Ollama the default model path because it keeps the assistant private, avoids external API cost, and lets the whole project run with only local infrastructure.
+
+I kept the cron job isolated so the nightly brief runs in a separate session from normal chat traffic. That reduces cross-talk between user messages and scheduled jobs and makes the delivery path easier to reason about.
 
 ## Troubleshooting
 
@@ -273,10 +378,6 @@ I used a standing order rather than a webhook because the onboarding trigger is 
 | Ollama connection refused | Ollama container not healthy yet | Wait 60s for model pull to complete; check `docker compose logs ollama` |
 | MarkdownV2 parse error in Telegram | Unescaped special characters in generated text | The daily-quiz skill spec requires escaping — increase model quality or add a post-processing step |
 | `web_search` returns no results | DuckDuckGo rate-limit or network issue | Wait a few minutes and retry; or switch to the SearXNG service in docker-compose |
-
-## Design Rationale
-
-The project keeps the moving parts intentionally small so the reviewer can trace the complete workflow quickly. Telegram handles the user interface, OpenClaw handles orchestration, Ollama provides local inference, and the skills encapsulate the learning logic. That separation makes the project easy to explain, easy to run locally, and easier to validate in a submission setting.
 
 ## File Structure
 
